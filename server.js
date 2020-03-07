@@ -18,6 +18,7 @@ var salt, hash;
 
 
 http.createServer();
+//http.setTimeout(10*60*1000);
 
 var app = express();
 
@@ -46,7 +47,7 @@ app.post('/signup', function(req, res) {
   var password = req.body.user.password;
   salt = crypto.randomBytes(16).toString('hex');
   hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex')
-  var ob = {
+  const ob = {
       name : user.name,
       email : user.email,
       salt : salt,
@@ -58,14 +59,9 @@ app.post('/signup', function(req, res) {
   jwt.sign({ob}, 'secretkey', (err, token) => {
     userdb.registerUser(ob, function (err, info) {
           if (err) {
-              res.send({"error" : "something went wrong" + err})
+              res.send({"error": err})
           } else {
-            res.status(200);
-          //res.setHeader("Content-Type", "text/html");
-            res.send({
-                "info": "User Regiestered",
-                token : token
-            });
+           res.status(200).send({token});
           }
           
       })
@@ -74,47 +70,28 @@ app.post('/signup', function(req, res) {
 });
 
 app.post('/login', (req, res) => {  
-  var password = req.body.user.password; 
-  userdb.loginUser(req.body.user.email, function (err, rows) {
-      if(err) {
-          res.send(err);
+  var userData = req.body.user; 
+  userdb.loginUser(userData.email, function (err, rows) {
+    let user = rows[0];
+    if(err) {
+      res.send(err);
+    } else {
+      if (!user) {
+        res.status(401).send('Invalid user');
       } else {
-          var result = {};
-          if (rows.length === 0) {
-              result["validPassword"] = false;
-              result["validUser"] = false;
-              result["message"] = "Invalid User";
-              res.send(result);
-          } else {
-              result["validUser"] = true;
-              var user = result["user"] = rows && rows[0];
-              //var loginUserHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');  
-              if (user.userid) {
-                res.send({
-                  "info" : user
-                })
-                      // result["validPassword"] = true;
-                      // result["message"] = "Success";
-                      // jwt.sign({user}, 'secretkey', (err, token) => {                            
-                      //     res.send({
-                      //         "info": result,
-                      //          token : token
-                      //     })
-                      // })
-                     
-
-              } else {
-                  result["validPassword"] = false;
-                  result["message"] = "Incorrect Password";
-                  res.send(result);
-              }
-          } 
+        let payload = {user : user};
+        let token = jwt.sign(payload, 'secretkey');
+        res.status(200).send({
+          user: user,
+          token: token
+        })
       }
-      //return err ? res.json(err) : res.send(rows && rows[0]);
+    }
+      
   })
 });
 
-app.post('/addNewOrder', (req, res) => { debugger;
+app.post('/addNewOrder', verifyToken, (req, res) => { debugger;
   
       var ob = {
         productName : req.body.payLoad.productName,
@@ -139,9 +116,9 @@ app.post('/addNewOrder', (req, res) => { debugger;
   
 });
 
-app.post('/getOrderList',  (req, res) => {  
+app.post('/getOrderList', verifyToken, (req, res) => {  
       var ob = {
-          id : req.body.info.userid
+          id : req.body.userid
       }
       productdb.getItemList(ob, (err, rows) => {
           if(err) {
@@ -150,13 +127,26 @@ app.post('/getOrderList',  (req, res) => {
               res.send({
                 "status": 200,
                 "list": rows
-                //,
-                //token : token
             });
               res.end();
           }
       })  
 });
+
+function verifyToken(req, res, next) {
+  if(!req.headers.authorization) {
+    return res.status(401).send('Unauthorized request');
+  }
+  let token = req.headers.authorization.split(' ')[1];
+  if (token === 'null') {
+    return res.status(401).send('Unauthorized request');
+  }
+  let verifyPayload = jwt.verify(token, 'secretkey');
+  if (!verifyPayload) {
+    return res.status(401).send('Unauthorized request');
+  }
+  next();
+}
 
 app.listen(9090, function (){
   console.log("Express server is runing on 1000")
